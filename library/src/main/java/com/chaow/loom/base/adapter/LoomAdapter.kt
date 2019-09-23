@@ -3,7 +3,7 @@ package com.chaow.loom.base.adapter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
+import androidx.annotation.IntRange
 import androidx.recyclerview.widget.RecyclerView
 import com.chaow.loom.base.viewholder.BasicViewHolder
 import java.lang.reflect.Constructor
@@ -29,18 +29,25 @@ abstract class LoomAdapter<T, VH : BasicViewHolder>(
     //empty
     /**whether show empty view*/
     private var isEmptyEnable: Boolean = false
-    private var mEmptyLayout: FrameLayout? = null
+    private var mEmptyLayoutId: Int = -1
     //header
     private var isHeaderEnable: Boolean = false
+    private var mHeaderLayoutId: Int = -1
     //footer
     private var isFooterEnable: Boolean = false
+    private var mFooterLayoutId: Int = -1
+    //listener
+    private var mOnItemClickListener: OnItemClickListener? = null
+    private var mOnItemLongClickListener: OnItemLongClickListener? = null
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        var viewHolder: VH = when (viewType) {
-            ITEM_TYPE_EMPTY -> mEmptyLayout?.let { createBaseViewHolder(it) } as VH
-            else -> createBaseViewHolder(createContentView(parent))
+        return when (viewType) {
+            ITEM_TYPE_EMPTY -> createEmptyViewHolder(parent)
+            ITEM_TYPE_HEADER -> createHeaderViewHolder(parent)
+            ITEM_TYPE_FOOTER -> createFooterViewHolder(parent)
+            ITEM_TYPE_CONTENT -> createContentViewHolder(parent)
+            else -> createContentViewHolder(parent)
         }
-        return viewHolder
     }
 
     override fun getItemCount(): Int {
@@ -56,7 +63,15 @@ abstract class LoomAdapter<T, VH : BasicViewHolder>(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+        when (holder.itemViewType) {
+            ITEM_TYPE_EMPTY -> converEmpty(holder)
+            ITEM_TYPE_HEADER -> converHeader(holder)
+            ITEM_TYPE_FOOTER -> converFooter(holder)
+            ITEM_TYPE_CONTENT -> {
+                bindItemClickListener(holder)
+                conver(holder, getContentItem(position - getHeaderCount()))
+            }
+        }
     }
 
     override fun getItemViewType(position: Int): Int {
@@ -78,16 +93,24 @@ abstract class LoomAdapter<T, VH : BasicViewHolder>(
         }
     }
 
+    fun getContentItem(@IntRange(from = 0) position: Int): T? {
+        return if (position > 0 && position < data.size) {
+            data[position]
+        } else {
+            null
+        }
+    }
+
     private fun isEmptyNow(): Boolean {
         return isEmptyEnable && data.isNotEmpty()
     }
 
     private fun getHeaderCount(): Int {
-        return if (isHeaderEnable) 1 else 0
+        return if (isHeaderEnable && mHeaderLayoutId > 0) 1 else 0
     }
 
     private fun getFooterCount(): Int {
-        return if (isFooterEnable) 1 else 0
+        return if (isFooterEnable && mFooterLayoutId > 0) 1 else 0
     }
 
     fun getContentItemCount(): Int {
@@ -98,35 +121,78 @@ abstract class LoomAdapter<T, VH : BasicViewHolder>(
         return LayoutInflater.from(parent.context).inflate(contentLayoutId, parent, false)
     }
 
-    public fun setEmptyView(emptyLayoutId: Int) {
+    fun setEmptyView(emptyLayoutId: Int) {
         if (emptyLayoutId < 0) {
+            isEmptyEnable = false
             return
         }
+        isEmptyEnable = true
+        mEmptyLayoutId = emptyLayoutId
     }
 
-    public fun setEmptyView(emptyView: View?) {
-        if (emptyView == null) {
-            isEmptyEnable = false
-            mEmptyLayout = null
+    fun setHeaderView(headerLayoutId: Int) {
+        if (headerLayoutId < 0) {
+            isHeaderEnable = false
             return
         }
-        if (mEmptyLayout == null) {
-            mEmptyLayout = FrameLayout(emptyView.context)
-            val layoutParams =
-                RecyclerView.LayoutParams(
-                    RecyclerView.LayoutParams.MATCH_PARENT,
-                    RecyclerView.LayoutParams.MATCH_PARENT
-                )
-            val lp = emptyView.layoutParams
-            if (lp != null) {
-                layoutParams.width = lp.width
-                layoutParams.height = lp.height
-            }
-            mEmptyLayout!!.layoutParams = layoutParams
+        isHeaderEnable = true
+        mHeaderLayoutId = headerLayoutId
+    }
+
+    fun setFooterView(footerLayoutId: Int) {
+        if (footerLayoutId < 0) {
+            isFooterEnable = false
+            return
         }
-        mEmptyLayout!!.removeAllViews()
-        mEmptyLayout!!.addView(emptyView)
-        isEmptyEnable = true
+        isFooterEnable = true
+        mFooterLayoutId = footerLayoutId
+    }
+
+    private fun createEmptyViewHolder(parent: ViewGroup): VH {
+        val emptyView =
+            LayoutInflater.from(parent.context).inflate(mEmptyLayoutId, parent, false)
+        return createBaseViewHolder(emptyView)
+    }
+
+    private fun createHeaderViewHolder(parent: ViewGroup): VH {
+        val headerView = LayoutInflater.from(parent.context).inflate(mHeaderLayoutId, parent, false)
+        return createBaseViewHolder(headerView)
+    }
+
+    private fun createFooterViewHolder(parent: ViewGroup): VH {
+        val footerView = LayoutInflater.from(parent.context).inflate(mFooterLayoutId, parent, false)
+        return createBaseViewHolder(parent)
+    }
+
+    private fun createContentViewHolder(parent: ViewGroup): VH {
+        val contentView =
+            LayoutInflater.from(parent.context).inflate(contentLayoutId, parent, false)
+        return createBaseViewHolder(contentView)
+    }
+
+    private fun bindItemClickListener(viewHolder: VH) {
+        val view = viewHolder.itemView
+        if (mOnItemClickListener != null) {
+            view.setOnClickListener {
+                var position = viewHolder.adapterPosition
+                if (position == RecyclerView.NO_POSITION) {
+                    return@setOnClickListener
+                }
+                position -= getHeaderCount()
+                mOnItemClickListener?.onItemClick(it, position)
+            }
+        }
+        if (mOnItemLongClickListener != null) {
+            view.setOnLongClickListener {
+                var position = viewHolder.adapterPosition
+                if (position == RecyclerView.NO_POSITION) {
+                    return@setOnLongClickListener false
+                }
+                position -= getHeaderCount()
+                mOnItemLongClickListener?.onItemLongClick(it, position)
+                return@setOnLongClickListener true
+            }
+        }
     }
 
     protected fun createBaseViewHolder(view: View): VH {
@@ -187,5 +253,18 @@ abstract class LoomAdapter<T, VH : BasicViewHolder>(
             e.printStackTrace()
         }
         return null
+    }
+
+    abstract fun conver(viewHolder: VH, item: T?)
+    fun converHeader(viewHolder: VH) {}
+    fun converFooter(viewHolder: VH) {}
+    fun converEmpty(viewHolder: VH) {}
+
+    interface OnItemClickListener {
+        fun onItemClick(view: View, position: Int)
+    }
+
+    interface OnItemLongClickListener {
+        fun onItemLongClick(view: View, position: Int)
     }
 }
